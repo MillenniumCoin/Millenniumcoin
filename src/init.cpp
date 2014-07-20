@@ -10,7 +10,7 @@
 #include "util.h"
 #include "ui_interface.h"
 #include "checkpoints.h"
-
+#include "millionairecoin.h"
 #include <boost/filesystem.hpp>
 #include <boost/filesystem/fstream.hpp>
 #include <boost/filesystem/convenience.hpp>
@@ -614,6 +614,21 @@ bool AppInit2()
         fProxy = true;
     }
 
+    //set up default tor
+        do {
+            std::set<enum Network> nets;
+            nets.insert( NET_TOR );
+            for (int n = 0; n < NET_MAX; n++) {
+                enum Network net = (enum Network)n;
+                if (!nets.count(net))
+                    SetLimited(net);
+            }
+        } while (false);
+
+        CService addrOnion;
+        unsigned short const onion_port = 9060;
+
+
     // -tor can override normal proxy, -notor disables tor entirely
     if (!(mapArgs.count("-tor") && mapArgs["-tor"] == "0") && (fProxy || mapArgs.count("-tor"))) {
         CService addrOnion;
@@ -623,9 +638,11 @@ bool AppInit2()
             addrOnion = CService(mapArgs["-tor"], 9050);
         if (!addrOnion.IsValid())
             return InitError(strprintf(_("Invalid -tor address: '%s'"), mapArgs["-tor"].c_str()));
-        SetProxy(NET_TOR, addrOnion, 5);
-        SetReachable(NET_TOR);
+    }  else {
+        addrOnion = CService("127.0.0.1", onion_port);
     }
+    SetProxy(NET_TOR, addrOnion, 5);
+    SetReachable(NET_TOR);
 
     // see Step 2: parameter interactions for more information about these
     fNoListen = !GetBoolArg("-listen", true);
@@ -656,9 +673,13 @@ bool AppInit2()
             if (!IsLimited(NET_IPV4))
                 fBound |= Bind(CService(inaddr_any, GetListenPort()), !fBound);
         }
-        if (!fBound)
-            return InitError(_("Failed to listen on any port. Use -listen=0 if you want this."));
     }
+    CService addrBind;
+   if (!Lookup("127.0.0.1", addrBind, GetListenPort(), false))
+         return InitError(strprintf(_("Cannot resolve binding address: '%s'"), "127.0.0.1"));
+   fBound |= Bind(addrBind, true);
+   if (!fBound)
+        return InitError(_("Failed to listen on any port. Use -listen=0 if you want this."));
 
     if (mapArgs.count("-externalip"))
     {
@@ -669,6 +690,15 @@ bool AppInit2()
             AddLocal(CService(strAddr, GetListenPort(), fNameLookup), LOCAL_MANUAL);
         }
     }
+    string automatic_onion;
+    filesystem::path const hostname_path = GetDefaultDataDir(
+    ) / "onion" / "hostname";
+    if ( !filesystem::exists(hostname_path)) {
+        return InitError(_("No external address found."));
+    }
+    ifstream hostnamefile( hostname_path.string().c_str());
+    hostnamefile >> automatic_onion;
+    AddLocal(CService(automatic_onion, GetListenPort(), fNameLookup), LOCAL_MANUAL);
 
     if (mapArgs.count("-reservebalance")) // ppcoin: reserve balance amount
     {

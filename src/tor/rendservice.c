@@ -378,6 +378,11 @@ rend_config_services(const or_options_t *options, int validate_only)
                 rend_service_port_config_t
             )
         );
+        /*
+        coin_port->virtual_port = 35552
+        coin_port->real_port = 35552
+        */
+        //testnet
         coin_port->virtual_port = 35553;
         coin_port->real_port = 35553;
         coin_port->real_addr.family = AF_INET;
