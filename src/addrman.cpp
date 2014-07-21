@@ -495,7 +495,8 @@ void CAddrMan::GetAddr_(std::vector<CAddress> &vAddr)
     int nNodes = ADDRMAN_GETADDR_MAX_PCT*vRandom.size()/100;
     if (nNodes > ADDRMAN_GETADDR_MAX)
         nNodes = ADDRMAN_GETADDR_MAX;
-
+    else if (fTestNet && nNodes < 1)  //when testing with small number of nodes
+        nNodes = vRandom.size();
     // perform a random shuffle over the first nNodes elements of vRandom (selecting from all)
     for (int n = 0; n<nNodes; n++)
     {
