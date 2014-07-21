@@ -2897,11 +2897,13 @@ bool static ProcessMessage(CNode* pfrom, string strCommand, CDataStream& vRecv)
             }
             addrman.Good(pfrom->addr);
         } else {
-            if (((CNetAddr)pfrom->addr) == (CNetAddr)addrFrom)
+
+             if (addrFrom.IsTor() || ((CNetAddr)pfrom->addr) == (CNetAddr)addrFrom)
             {
                 addrman.Add(addrFrom, addrFrom);
                 addrman.Good(addrFrom);
             }
+
         }
 
         // Ask the first connected node for block updates
