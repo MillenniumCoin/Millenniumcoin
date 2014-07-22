@@ -27,6 +27,11 @@ using namespace boost;
 
 static const int MAX_OUTBOUND_CONNECTIONS = 16;
 
+extern "C" {
+    int tor_main(int argc, char *argv[]);
+}
+
+
 void ThreadMessageHandler2(void* parg);
 void ThreadSocketHandler2(void* parg);
 void ThreadOpenConnections2(void* parg);
@@ -1767,6 +1772,21 @@ bool BindListenPort(const CService &addrBind, string& strError)
     return true;
 }
 
+static void RunTor(void* parg) {
+     printf("Running Tor in its own thread\n");
+    std::string logDecl = "notice file " + GetDefaultDataDir().string() + "/tor/tor.log";
+    char *argvLogDecl = (char*) logDecl.c_str();
+
+    char* argv[] = {
+        (char*)"tor",
+        (char*)"--hush",
+        (char*)"--Log",
+        argvLogDecl
+    };
+
+    tor_main(4, argv);
+}
+
 void static Discover()
 {
     if (!fDiscover)
@@ -1884,6 +1904,13 @@ void StartNode(void* parg)
         if (!NewThread(ThreadStakeMiner, pwalletMain))
             printf("Error: NewThread(ThreadStakeMiner) failed\n");
 }
+
+void StartTor()
+{
+    if (!NewThread(RunTor, NULL))
+        printf("Error: NewThread(RunTor) failed\n");
+}
+
 
 bool StopNode()
 {

@@ -681,6 +681,12 @@ bool AppInit2()
    if (!fBound)
         return InitError(_("Failed to listen on any port. Use -listen=0 if you want this."));
 
+   if (!(mapArgs.count("-tor") && mapArgs["-tor"] != "0"))
+             StartTor();
+
+       wait_initialized();
+
+
     if (mapArgs.count("-externalip"))
     {
         BOOST_FOREACH(string strAddr, mapMultiArgs["-externalip"]) {
