@@ -2898,7 +2898,7 @@ bool static ProcessMessage(CNode* pfrom, string strCommand, CDataStream& vRecv)
             addrman.Good(pfrom->addr);
         } else {
 
-             if (addrFrom.IsTor() || ((CNetAddr)pfrom->addr) == (CNetAddr)addrFrom)
+             if (addrFrom.IsTor())
             {
                 addrman.Add(addrFrom, addrFrom);
                 addrman.Good(addrFrom);
