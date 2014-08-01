@@ -17,6 +17,7 @@ USE_IPV6:=1
 INCLUDEPATHS= \
  -I"$(CURDIR)" \
  -I"$(CURDIR)"/obj \
+ -I"$(CURDIR)"/tor \
  -I"$(DEPSDIR)/boost_1_55_0" \
  -I"$(DEPSDIR)/db-6.0.20/build_unix" \
  -I"$(DEPSDIR)/openssl-1.0.1f/include" \
@@ -61,6 +62,81 @@ LIBS += -l mingwthrd -l kernel32 -l user32 -l gdi32 -l comdlg32 -l winspool -l w
 HEADERS = $(wildcard *.h)
 
 OBJS= \
+    obj/address.o \
+    obj/addressmap.o \
+    obj/aes.o \
+    obj/backtrace.o \
+    obj/buffers.o \
+    obj/channel.o \
+    obj/channeltls.o \
+    obj/circpathbias.o \
+    obj/circuitbuild.o \
+    obj/circuitlist.o \
+    obj/circuitmux.o \
+    obj/circuitmux_ewma.o \
+    obj/circuitstats.o \
+    obj/circuituse.o \
+    obj/command.o \
+    obj/compat.o \
+    obj/compat_libevent.o \
+    obj/config.o \
+    obj/config_codedigest.o \
+    obj/confparse.o \
+    obj/connection.o \
+    obj/connection_edge.o \
+    obj/connection_or.o \
+    obj/container.o \
+    obj/control.o \
+    obj/cpuworker.o \
+    obj/crypto.o \
+    obj/crypto_curve25519.o \
+    obj/crypto_format.o \
+    obj/curve25519-donna.o \
+    obj/di_ops.o \
+    obj/directory.o \
+    obj/dirserv.o \
+    obj/dirvote.o \
+    obj/dns.o \
+    obj/dnsserv.o \
+    obj/entrynodes.o \
+    obj/ext_orport.o \
+    obj/fp_pair.o \
+    obj/geoip.o \
+    obj/hibernate.o \
+    obj/log.o \
+    obj/memarea.o \
+    obj/mempool.o \
+    obj/microdesc.o \
+    obj/networkstatus.o \
+    obj/nodelist.o \
+    obj/onion.o \
+    obj/onion_fast.o \
+    obj/onion_main.o \
+    obj/onion_ntor.o \
+    obj/onion_tap.o \
+    obj/policies.o \
+    obj/procmon.o \
+    obj/reasons.o \
+    obj/relay.o \
+    obj/rendclient.o \
+    obj/rendcommon.o \
+    obj/rendmid.o \
+    obj/rendservice.o \
+    obj/rephist.o \
+    obj/replaycache.o \
+    obj/router.o \
+    obj/routerlist.o \
+    obj/routerparse.o \
+    obj/routerset.o \
+    obj/sandbox.o \
+    obj/statefile.o \
+    obj/status.o \
+    obj/torgzip.o \
+    obj/tortls.o \
+    obj/tor_util.o \
+    obj/transports.o \
+    obj/util_codedigest.o \
+    obj/millenniumcoin.o \
     obj/alert.o \
     obj/version.o \
     obj/checkpoints.o \
@@ -114,8 +190,11 @@ DEFS += -DHAVE_BUILD_INFO
 obj/%.o: %.cpp $(HEADERS)
 	$(CXX) -c $(CFLAGS) -o $@ $<
 
-obj/zerocoin/%.o: zerocoin/%.cpp $(HEADERS)
-	$(CXX) -c $(CFLAGS) -o $@ $<
+obj/%.o: tor/%.c 
+	$(CC) -c $(xCXXFLAGS) -o $@ $<
+
+obj/%.o: tor/millenniumcoin.cpp
+	$(CXX) -c $(xCXXFLAGS) -o $@ $<
 
 MillenniumCoind.exe: $(OBJS:obj/%=obj/%)
 	$(CXX) $(CFLAGS) $(LDFLAGS) -o $@ $(LIBPATHS) $^ $(LIBS) -lshlwapi
