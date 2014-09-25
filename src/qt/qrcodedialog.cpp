@@ -7,8 +7,9 @@
 #include "optionsmodel.h"
 
 #include <QPixmap>
+#if QT_VERSION < 0x050000
 #include <QUrl>
-
+#endif
 #include <qrencode.h>
 
 QRCodeDialog::QRCodeDialog(const QString &addr, const QString &label, bool enableReq, QWidget *parent) :
