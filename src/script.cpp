@@ -20,6 +20,10 @@ using namespace boost;
 
 bool CheckSig(vector<unsigned char> vchSig, vector<unsigned char> vchPubKey, CScript scriptCode, const CTransaction& txTo, unsigned int nIn, int nHashType);
 
+bool CheckDataSig(vector<unsigned char> vchSig, const vector<unsigned char> &vchPubKey, uint256 sighash, int nHashType, int flags);
+
+bool CheckTransferNonce(uint256 txid, const vector<unsigned char> & nonce);
+
 static const valtype vchFalse(0);
 static const valtype vchZero(0);
 static const valtype vchTrue(1, 1);
@@ -100,6 +104,10 @@ const char* GetTxnOutputType(txnouttype t)
     switch (t)
     {
     case TX_NONSTANDARD: return "nonstandard";
+    case TX_ESCROW_FEE: return "escrow-fee";
+    case TX_ESCROW_SENDER: return "escrow-sender";
+    case TX_ESCROW: return "escrow";
+    case TX_PUBKEYHASH_NONCED: return "pubkeyhash-nonced";
     case TX_PUBKEY: return "pubkey";
     case TX_PUBKEYHASH: return "pubkeyhash";
     case TX_SCRIPTHASH: return "scripthash";
@@ -227,7 +235,10 @@ const char* GetOpName(opcodetype opcode)
     case OP_CHECKSIGVERIFY         : return "OP_CHECKSIGVERIFY";
     case OP_CHECKMULTISIG          : return "OP_CHECKMULTISIG";
     case OP_CHECKMULTISIGVERIFY    : return "OP_CHECKMULTISIGVERIFY";
-
+    
+    case OP_CHECKDATASIG           : return "OP_CHECKDATASIG"; 
+	case OP_CHECKTRANSFERNONCE     : return "OP_CHECKTRANSFERNONCE"; 
+	case OP_CHECKEXPIRY            : return "OP_CHECKEXPIRY"; 
     // expanson
     case OP_NOP1                   : return "OP_NOP1";
     case OP_NOP2                   : return "OP_NOP2";
@@ -1026,6 +1037,63 @@ bool EvalScript(vector<vector<unsigned char> >& stack, const CScript& script, co
                     }
                 }
                 break;
+                
+                case OP_CHECKEXPIRY:
+                {
+                    // (height -- bool)
+                    if (stack.size() < 1) {
+                        return false;
+                    }
+
+                    int const height = CastToBigNum(stacktop(-1)).getint();
+
+                    bool fSuccess = nBestHeight > height;
+
+                    popstack(stack);
+                    stack.push_back(fSuccess ? vchTrue : vchFalse);
+                }
+                break;
+
+                case OP_CHECKTRANSFERNONCE:
+                {
+                    // (txid nonce -- bool)
+                    if (stack.size() < 2)
+                        return false;
+
+                    valtype& txidval   = stacktop(-2);
+                    valtype& nonce     = stacktop(-1);
+
+                    uint256 txid(vector<unsigned char>(txidval.rbegin(),txidval.rend()));
+
+                    bool fSuccess = CheckTransferNonce(txid, nonce);
+
+                    popstack(stack);
+                    popstack(stack);
+                    stack.push_back(fSuccess ? vchTrue : vchFalse);
+                }
+                break;
+
+                case OP_CHECKDATASIG:
+                {
+                    // (data sig pubkey -- bool)
+                    if (stack.size() < 3)
+                        return false;
+
+                    valtype& vch       = stacktop(-3);
+                    valtype& vchSig    = stacktop(-2);
+                    valtype& vchPubKey = stacktop(-1);
+
+                    uint256 hash = Hash(vch.begin(), vch.end());
+
+                    bool fSuccess = CheckDataSig(vchSig, vchPubKey, hash, nHashType, 0);
+
+                    popstack(stack);
+                    popstack(stack);
+                    popstack(stack);
+                    stack.push_back(fSuccess ? vchTrue : vchFalse);
+                }
+                break;
+
 
                 case OP_CHECKMULTISIG:
                 case OP_CHECKMULTISIGVERIFY:
@@ -1281,12 +1349,69 @@ bool CheckSig(vector<unsigned char> vchSig, vector<unsigned char> vchPubKey, CSc
     return true;
 }
 
+bool CheckDataSig(vector<unsigned char> vchSig, const vector<unsigned char> &vchPubKey, uint256 sighash, int nHashType, int flags)
+{
+    static CSignatureCache signatureCache;
 
+    CPubKey pubkey(vchPubKey);
+    if (!pubkey.IsValid())
+        return false;
 
+    // Hash type is one byte tacked on to the end of the signature
+    if (vchSig.empty())
+        return false;
+    if (nHashType == 0)
+        nHashType = vchSig.back();
+    else if (nHashType != vchSig.back())
+        return false;
+    vchSig.pop_back();
 
+    if (signatureCache.Get(sighash, vchSig, vchPubKey))
+        return true;
 
+    if (!pubkey.Verify(sighash, vchSig))
+        return false;
 
+    if (!(flags & SCRIPT_VERIFY_NOCACHE))
+        signatureCache.Set(sighash, vchSig, vchPubKey);
 
+    return true;
+}
+
+bool CheckTransferNonce(uint256 txid, const vector<unsigned char> & nonce)
+{
+    CTransaction tx;
+    uint256 hashBlock = 0;
+    if (!GetTransaction(txid, tx, hashBlock)) {
+        throw runtime_error("transaction unknown");
+    }
+
+    if (tx.vout.empty()) {
+        return false;
+    }
+
+    opcodetype opcode;
+    std::vector<unsigned char> vch;
+    CScript::const_iterator pc = tx.vout[0].scriptPubKey.begin();
+    while (pc < tx.vout[0].scriptPubKey.end())
+    {
+        if (!tx.vout[0].scriptPubKey.GetOp(pc, opcode, vch))
+        {
+            return false;
+        }
+        if (0 <= opcode && opcode <= OP_PUSHDATA4) {
+            if (nonce != vch) {
+                return false;
+            }
+        }
+        else {
+            if (OP_TOALTSTACK == opcode) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
 
 
 //
@@ -1306,6 +1431,18 @@ bool Solver(const CScript& scriptPubKey, txnouttype& typeRet, vector<vector<unsi
 
         // Sender provides N pubkeys, receivers provides M signatures
         mTemplates.insert(make_pair(TX_MULTISIG, CScript() << OP_SMALLINTEGER << OP_PUBKEYS << OP_SMALLINTEGER << OP_CHECKMULTISIG));
+        
+        //NUDSend
+        mTemplates.insert(make_pair(TX_ESCROW, CScript() << OP_IF << OP_PUBKEYHASH << OP_DUP << OP_PUBKEY << OP_PUBKEY << OP_CHECKDATASIG << OP_VERIFY << OP_SWAP << OP_HASH160 << OP_EQUAL << OP_VERIFY << OP_PUBKEYHASH << OP_TOALTSTACK << OP_DUP << OP_HASH160 << OP_PUBKEYHASH << OP_EQUALVERIFY << OP_CHECKSIG << OP_ELSE << OP_NUMERIC << OP_CHECKEXPIRY << OP_ENDIF));
+
+        mTemplates.insert(make_pair(TX_ESCROW_SENDER, CScript() << OP_IF << OP_IF << OP_PUBKEYHASH << OP_DUP << OP_PUBKEY << OP_PUBKEY << OP_CHECKDATASIG << OP_VERIFY << OP_SWAP << OP_HASH160 << OP_EQUAL << OP_VERIFY << OP_CHECKTRANSFERNONCE << OP_ELSE << OP_PUBKEYHASH << OP_TOALTSTACK << OP_DUP << OP_HASH160 << OP_PUBKEYHASH << OP_EQUALVERIFY << OP_CHECKSIG << OP_ENDIF << OP_ELSE << OP_NUMERIC << OP_CHECKEXPIRY << OP_ENDIF));
+
+        mTemplates.insert(make_pair(TX_ESCROW_FEE, CScript() << OP_IF << OP_PUBKEYHASH << OP_TOALTSTACK << OP_DUP << OP_HASH160 << OP_PUBKEYHASH << OP_EQUALVERIFY << OP_CHECKSIG << OP_ELSE << OP_NUMERIC << OP_CHECKEXPIRY << OP_ENDIF));
+        
+      // transfer nonce, Bitcoin address tx, sender provides hash of pubkey, receiver provides signature and pubkey
+        mTemplates.insert(make_pair(TX_PUBKEYHASH_NONCED, CScript() << OP_NONCE << OP_TOALTSTACK << OP_DUP << OP_HASH160 << OP_PUBKEYHASH << OP_EQUALVERIFY << OP_CHECKSIG));
+  
+
     }
 
     // Shortcut for pay-to-script-hash, which are more constrained than the other types:
@@ -1376,6 +1513,18 @@ bool Solver(const CScript& scriptPubKey, txnouttype& typeRet, vector<vector<unsi
             else if (opcode2 == OP_PUBKEYHASH)
             {
                 if (vch1.size() != sizeof(uint160))
+                    break;
+                vSolutionsRet.push_back(vch1);
+            }
+            else if (opcode2 == OP_NONCE)
+            {
+                if (vch1.size() > 9)
+                    break;
+                vSolutionsRet.push_back(vch1);
+            }
+            else if (opcode2 == OP_NUMERIC)
+            {
+                if (vch1.size() > 4)
                     break;
                 vSolutionsRet.push_back(vch1);
             }
@@ -1456,6 +1605,40 @@ bool Solver(const CKeyStore& keystore, const CScript& scriptPubKey, uint256 hash
     case TX_PUBKEY:
         keyID = CPubKey(vSolutions[0]).GetID();
         return Sign1(keyID, keystore, hash, nHashType, scriptSigRet);
+    case TX_ESCROW_FEE:
+        keyID = CKeyID(uint160(vSolutions[1]));
+        if (!Sign1(keyID, keystore, hash, nHashType, scriptSigRet))
+            return false;
+        else
+        {
+            CPubKey vch;
+            keystore.GetPubKey(keyID, vch);
+            scriptSigRet << vch;
+        }
+        return true;
+    case TX_ESCROW_SENDER:
+    case TX_ESCROW:
+        keyID = CKeyID(uint160(vSolutions[4]));
+        if (!Sign1(keyID, keystore, hash, nHashType, scriptSigRet))
+            return false;
+        else
+        {
+            CPubKey vch;
+            keystore.GetPubKey(keyID, vch);
+            scriptSigRet << vch;
+        }
+        return true;
+    case TX_PUBKEYHASH_NONCED:
+        keyID = CKeyID(uint160(vSolutions[1]));
+        if (!Sign1(keyID, keystore, hash, nHashType, scriptSigRet))
+            return false;
+        else
+        {
+            CPubKey vch;
+            keystore.GetPubKey(keyID, vch);
+            scriptSigRet << vch;
+        }
+        return true;    
     case TX_PUBKEYHASH:
         keyID = CKeyID(uint160(vSolutions[0]));
         if (!Sign1(keyID, keystore, hash, nHashType, scriptSigRet))
@@ -1485,7 +1668,14 @@ int ScriptSigArgsExpected(txnouttype t, const std::vector<std::vector<unsigned c
         return -1;
     case TX_PUBKEY:
         return 1;
+    case TX_ESCROW_SENDER:
+        return 5;
+    case TX_ESCROW:
+        return 4;
+    case TX_ESCROW_FEE:
+        return 3;    
     case TX_PUBKEYHASH:
+    case TX_PUBKEYHASH_NONCED:
         return 2;
     case TX_MULTISIG:
         if (vSolutions.size() < 1 || vSolutions[0].size() < 1)
@@ -1563,6 +1753,13 @@ bool IsMine(const CKeyStore &keystore, const CScript& scriptPubKey)
     case TX_PUBKEY:
         keyID = CPubKey(vSolutions[0]).GetID();
         return keystore.HaveKey(keyID);
+    case TX_ESCROW_FEE:
+    case TX_ESCROW_SENDER:
+    case TX_ESCROW:
+        return false;
+    case TX_PUBKEYHASH_NONCED:
+        keyID = CKeyID(uint160(vSolutions[1]));
+        return keystore.HaveKey(keyID);    
     case TX_PUBKEYHASH:
         keyID = CKeyID(uint160(vSolutions[0]));
         return keystore.HaveKey(keyID);
@@ -1597,6 +1794,26 @@ bool ExtractDestination(const CScript& scriptPubKey, CTxDestination& addressRet)
     if (whichType == TX_PUBKEY)
     {
         addressRet = CPubKey(vSolutions[0]).GetID();
+        return true;
+    }
+    else if (whichType == TX_ESCROW_FEE)
+    {
+        addressRet = CKeyID(uint160(vSolutions[1]));
+        return true;
+    }
+    else if (whichType == TX_ESCROW_SENDER)
+    {
+        addressRet = CKeyID(uint160(vSolutions[4]));
+        return true;
+    }
+    else if (whichType == TX_ESCROW)
+    {
+        addressRet = CKeyID(uint160(vSolutions[4]));
+        return true;
+    }
+    else if (whichType == TX_PUBKEYHASH_NONCED)
+    {
+        addressRet = CKeyID(uint160(vSolutions[1]));
         return true;
     }
     else if (whichType == TX_PUBKEYHASH)
@@ -1852,6 +2069,10 @@ static CScript CombineSignatures(CScript scriptPubKey, const CTransaction& txTo,
             return PushAll(sigs1);
         return PushAll(sigs2);
     case TX_PUBKEY:
+    case TX_PUBKEYHASH_NONCED:
+    case TX_ESCROW_FEE:
+    case TX_ESCROW_SENDER:
+    case TX_ESCROW:
     case TX_PUBKEYHASH:
         // Signatures are bigger than placeholders or empty scripts:
         if (sigs1.empty() || sigs1[0].empty())

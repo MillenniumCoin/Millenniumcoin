@@ -30,11 +30,23 @@ enum
     SIGHASH_ANYONECANPAY = 0x80,
 };
 
+/** Script verification flags */
+enum
+{
+    SCRIPT_VERIFY_NONE      = 0,
+    SCRIPT_VERIFY_P2SH      = (1U << 0),
+    SCRIPT_VERIFY_STRICTENC = (1U << 1),
+    SCRIPT_VERIFY_NOCACHE   = (1U << 2),
+};
 
 enum txnouttype
 {
     TX_NONSTANDARD,
     // 'standard' transaction types:
+     TX_ESCROW_FEE,
+    TX_ESCROW_SENDER,
+    TX_ESCROW,
+    TX_PUBKEYHASH_NONCED,
     TX_PUBKEY,
     TX_PUBKEYHASH,
     TX_SCRIPTHASH,
@@ -193,8 +205,13 @@ enum opcodetype
     OP_NOP10 = 0xb9,
 
 
+    OP_CHECKDATASIG = 0xba,
+    OP_CHECKTRANSFERNONCE = 0xbb,
+    OP_CHECKEXPIRY = 0xbc,
 
     // template matching params
+    OP_NONCE = 0xf8,
+    OP_NUMERIC = 0xf9,
     OP_SMALLINTEGER = 0xfa,
     OP_PUBKEYS = 0xfb,
     OP_PUBKEYHASH = 0xfd,
@@ -603,10 +620,12 @@ bool SignSignature(const CKeyStore& keystore, const CScript& fromPubKey, CTransa
 bool SignSignature(const CKeyStore& keystore, const CTransaction& txFrom, CTransaction& txTo, unsigned int nIn, int nHashType=SIGHASH_ALL);
 bool VerifyScript(const CScript& scriptSig, const CScript& scriptPubKey, const CTransaction& txTo, unsigned int nIn,
                   int nHashType);
+//bool VerifyScript(const CScript& scriptSig, const CScript& scriptPubKey, const CTransaction& txTo, unsigned int nIn, unsigned int flags, int nHashType);
 bool VerifySignature(const CTransaction& txFrom, const CTransaction& txTo, unsigned int nIn, int nHashType);
 
 // Given two sets of signatures for scriptPubKey, possibly with OP_0 placeholders,
 // combine them intelligently and return the result.
 CScript CombineSignatures(CScript scriptPubKey, const CTransaction& txTo, unsigned int nIn, const CScript& scriptSig1, const CScript& scriptSig2);
-
+bool Sign1(const CKeyID& address, const CKeyStore& keystore, uint256 hash, int nHashType, CScript& scriptSigRet);
+uint256 SignatureHash(CScript scriptCode, const CTransaction& txTo, unsigned int nIn, int nHashType);
 #endif

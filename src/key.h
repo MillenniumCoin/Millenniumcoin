@@ -96,6 +96,8 @@ public:
     std::vector<unsigned char> Raw() const {
         return vchPubKey;
     }
+
+    bool Verify(const uint256 &hash, const std::vector<unsigned char>& vchSig) const;
 };
 
 
